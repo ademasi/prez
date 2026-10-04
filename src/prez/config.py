@@ -142,6 +142,7 @@ class Config:
     start_blanked: bool = False
     pointer_color: str = "#ff0000"
     pointer_size: float = 0.02  # fraction of slide width
+    pointer_on: bool = True  # laser pointer follows the mouse from the start
     pens: list[Pen] = field(default_factory=default_pens)  # 9 pens
     active_pen: int = 1  # 1..9
     next_count: int = 1  # next-slide previews (v1 uses 1; keep the field)
@@ -186,6 +187,8 @@ start_blanked = false
 # slide width.
 pointer_color = "#ff0000"
 pointer_size = 0.02
+# Laser pointer active at startup (L toggles it).
+pointer_on = true
 
 # Highlighting: pen selected at startup (1-9), eraser width (fraction of the slide width).
 active_pen = 1
@@ -303,6 +306,7 @@ def config_from_mapping(raw: Mapping[str, Any]) -> Config:
     cfg.start_blanked = _bool(raw, "start_blanked", cfg.start_blanked)
     cfg.pointer_color = _color(raw, "pointer_color", cfg.pointer_color)
     cfg.pointer_size = _float(raw, "pointer_size", cfg.pointer_size, minimum=0.001, maximum=1.0)
+    cfg.pointer_on = _bool(raw, "pointer_on", cfg.pointer_on)
     cfg.active_pen = _int(raw, "active_pen", cfg.active_pen, minimum=1, maximum=len(cfg.pens))
     cfg.next_count = _int(raw, "next_count", cfg.next_count, minimum=0)
     cfg.slide_ratio = _float(raw, "slide_ratio", cfg.slide_ratio, minimum=0.1, maximum=0.9)

@@ -81,6 +81,7 @@ class SlideView(QWidget):
         self._blank: str | None = None
         self._pointer: tuple[float, float] | None = None
         self._pointer_color = QColor("#ff0000")
+        self._bg = QColor(_BLACK)
         self._pointer_size = 0.02
         self._strokes: list[Stroke] = []
         self._interactive = False
@@ -135,6 +136,11 @@ class SlideView(QWidget):
         if slide == self._slide:
             return
         self._slide = slide
+        self.update()
+
+    def set_background(self, color: QColor | str) -> None:
+        """Letterbox colour when not blanked (black by default)."""
+        self._bg = QColor(color)
         self.update()
 
     def set_blank(self, kind: str | None) -> None:
@@ -226,7 +232,11 @@ class SlideView(QWidget):
         return aspect if aspect > 0 else _DEFAULT_ASPECT
 
     def _background(self) -> QColor:
-        return _WHITE if self._blank == "white" else _BLACK
+        if self._blank == "white":
+            return _WHITE
+        if self._blank == "black":
+            return _BLACK
+        return self._bg
 
     def _normalize(self, pos: QPointF, rect: QRectF) -> tuple[float, float]:
         x = (pos.x() - rect.x()) / rect.width()

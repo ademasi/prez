@@ -19,6 +19,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QFrame, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
+from prez import theme
 from prez.document import Region
 
 if TYPE_CHECKING:
@@ -34,11 +35,11 @@ LABEL_H = 22
 MARGIN = 10
 THUMB_PRIORITY = 3
 
-BG = QColor("#202124")
-TEXT = QColor("#e8eaed")
-HIGHLIGHT = QColor("#8ab4f8")
-HOVER = QColor("#9aa0a6")
-PLACEHOLDER = QColor("#3c4043")
+BG = QColor(theme.BASE)
+TEXT = QColor(theme.TEXT)
+HIGHLIGHT = QColor(theme.ACCENT)
+HOVER = QColor(theme.SUBTEXT0)
+PLACEHOLDER = QColor(theme.SURFACE0)
 
 
 class _Grid(QWidget):

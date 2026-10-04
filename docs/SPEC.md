@@ -522,3 +522,18 @@ Deviations from the contract above that are now the de-facto interface:
 - SlideView emits `pointer_moved(None)` over the letterbox band instead of clamping.
 - On a single screen the content window is only fullscreen with an explicit `--fullscreen`.
 - User notes are saved at `<pdf path>.notes.json` with atomic writes.
+
+### Presenter rework (2026-10-03, second pass)
+
+- Toolbar is text only (no icons) with a "Panes" menu at the right.
+- The presenter is a `QMainWindow` whose central widget is the current slide / overview
+  stack; **Next slide**, **Notes** (`NotesPane(with_editor=False)`) and **My notes**
+  (`UserNotesEditor`) are `QDockWidget`s (movable, floatable, closable, nestable, tabbable),
+  layout persisted with `saveState(LAYOUT_VERSION)`; `reset_layout()` restores the default.
+  The status widgets live in a `QStatusBar`.
+- `NotesPane` keeps its old API; `with_editor=True` (default) embeds a `UserNotesEditor`.
+- `SlideView.set_background(color)` sets the letterbox colour (presenter uses `theme.CRUST`).
+- `Config.pointer_on` (default `true`); `PrezApp.set_pointer_mode(on, announce=...)`.
+- `PresenterWindow.release_text_focus()` is the first step of the `cancel` action.
+- `prez/theme.py`: Catppuccin Macchiato (foot) palette + Claude orange accent, applied as
+  `QPalette` + stylesheet by `apply_theme`; all widget colours import from it.

@@ -8,7 +8,7 @@ from collections.abc import Callable
 from functools import partial
 
 from PySide6.QtCore import QEvent, QFileSystemWatcher, QKeyCombination, QObject, Qt, QTimer
-from PySide6.QtGui import QColor, QKeyEvent, QKeySequence, QPalette, QScreen
+from PySide6.QtGui import QKeyEvent, QKeySequence, QScreen
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from prez import theme
 from prez.config import Config, Pen
 from prez.document import DocumentInfo, NotesMode, load_document
 from prez.render import RenderKey, RenderService
@@ -86,38 +87,8 @@ PORTABLE = QKeySequence.SequenceFormat.PortableText
 
 
 def apply_dark_theme(qapp: QApplication) -> None:
-    """Fusion style with a dark palette (window #202124, text #e8eaed, highlight #8ab4f8)."""
-    qapp.setStyle("Fusion")
-    window = QColor("#202124")
-    base = QColor("#2b2d31")
-    text = QColor("#e8eaed")
-    highlight = QColor("#8ab4f8")
-    button = QColor("#303134")
-    disabled = QColor("#80868b")
-
-    palette = QPalette()
-    role = QPalette.ColorRole
-    palette.setColor(role.Window, window)
-    palette.setColor(role.WindowText, text)
-    palette.setColor(role.Base, base)
-    palette.setColor(role.AlternateBase, window)
-    palette.setColor(role.ToolTipBase, base)
-    palette.setColor(role.ToolTipText, text)
-    palette.setColor(role.PlaceholderText, disabled)
-    palette.setColor(role.Text, text)
-    palette.setColor(role.Button, button)
-    palette.setColor(role.ButtonText, text)
-    palette.setColor(role.BrightText, QColor("#f28b82"))
-    palette.setColor(role.Highlight, highlight)
-    palette.setColor(role.HighlightedText, window)
-    palette.setColor(role.Link, highlight)
-    palette.setColor(role.Mid, QColor("#3c4043"))
-    palette.setColor(role.Dark, QColor("#17181a"))
-    group = QPalette.ColorGroup.Disabled
-    palette.setColor(group, role.Text, disabled)
-    palette.setColor(group, role.ButtonText, disabled)
-    palette.setColor(group, role.WindowText, disabled)
-    qapp.setPalette(palette)
+    """Catppuccin Macchiato palette with a Claude-orange accent (see prez.theme)."""
+    theme.apply_theme(qapp)
 
 
 def empty_document() -> DocumentInfo:
@@ -227,6 +198,8 @@ class PrezApp(QObject):
         self.content.view.set_pointer_style(config.pointer_color, config.pointer_size)
         self.presenter = PresenterWindow(self)
         self._wire_views()
+        if config.pointer_on:
+            self.set_pointer_mode(True, announce=False)
 
         self.state.slide_changed.connect(self._on_slide_changed)
         self.state.document_changed.connect(self._on_document_changed)
@@ -280,7 +253,7 @@ class PrezApp(QObject):
         self._reload_timer.stop()
         self._screen_timer.stop()
         try:
-            self.presenter.notes.flush()
+            self.presenter.flush_notes()
         except Exception:
             log.exception("flushing notes failed")
         try:
@@ -426,6 +399,8 @@ class PrezApp(QObject):
         presenter = self.presenter
         if presenter.cancel_input():
             return
+        if presenter.release_text_focus():
+            return
         if presenter.overview_visible():
             presenter.hide_overview()
             return
@@ -468,14 +443,15 @@ class PrezApp(QObject):
 
     # --------------------------------------------------------- pointer / pens
 
-    def set_pointer_mode(self, on: bool) -> None:
+    def set_pointer_mode(self, on: bool, *, announce: bool = True) -> None:
         if on and self.draw_mode:
             self.set_draw_mode(False)
         self.pointer_mode = on
         if not on:
             self.state.set_pointer(None)
         self.presenter.set_checked("pointer", on)
-        self.state.notify("Pointer on" if on else "Pointer off")
+        if announce:
+            self.state.notify("Pointer on" if on else "Pointer off")
 
     def set_draw_mode(self, on: bool) -> None:
         if on and self.pointer_mode:

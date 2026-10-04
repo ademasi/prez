@@ -1,11 +1,12 @@
-"""The presenter window: current slide, next slide, notes, timer and controls."""
+"""The presenter window: current slide in the centre, everything else in movable docks."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QEvent, QObject, QSettings, QSize, Qt, QTime, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, QSettings, Qt, QTime, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -19,22 +20,25 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
-    QHBoxLayout,
+    QDockWidget,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
+    QPlainTextEdit,
     QProgressBar,
-    QSplitter,
+    QSizePolicy,
     QStackedWidget,
-    QStyle,
+    QTextEdit,
     QToolBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from prez import theme
 from prez.document import Region
-from prez.widgets.notes_view import NotesPane
+from prez.widgets.notes_view import NotesPane, UserNotesEditor
 from prez.widgets.overview import OverviewWidget
 from prez.widgets.slide_view import SlideView
 
@@ -42,13 +46,14 @@ if TYPE_CHECKING:
     from prez.app import PrezApp
     from prez.document import DocumentInfo, Link
 
-GREEN = "#81c995"
-ORANGE = "#fdd663"
-RED = "#f28b82"
-MUTED = "#9aa0a6"
+GREEN = theme.GREEN
+ORANGE = theme.YELLOW
+RED = theme.RED
+MUTED = theme.SUBTEXT0
 
 MESSAGE_MS = 3000
 WHEEL_STEP = 120
+LAYOUT_VERSION = 2  # bump when the dock set changes, so stale saved layouts are ignored
 
 
 class ClickableLabel(QLabel):
@@ -75,28 +80,35 @@ class InputEdit(QLineEdit):
         super().keyPressEvent(event)
 
 
-# (action, label, standard icon, checkable); None is a separator.
-_TOOLBAR: list[tuple[str, str, QStyle.StandardPixmap | None, bool] | None] = [
-    ("pick-file", "Open", QStyle.StandardPixmap.SP_DialogOpenButton, False),
+# (action, label, checkable); None is a separator. Text only, no icons.
+_TOOLBAR: list[tuple[str, str, bool] | None] = [
+    ("pick-file", "Open", False),
     None,
-    ("prev", "Prev", QStyle.StandardPixmap.SP_ArrowLeft, False),
-    ("next", "Next", QStyle.StandardPixmap.SP_ArrowRight, False),
+    ("prev", "Prev", False),
+    ("next", "Next", False),
     None,
-    ("blank", "Blank", None, True),
-    ("freeze", "Freeze", None, True),
-    ("pointer", "Pointer", None, True),
-    ("highlight", "Pen", None, True),
-    ("overview", "Overview", QStyle.StandardPixmap.SP_FileDialogListView, True),
-    ("swap-screens", "Swap screens", None, False),
+    ("blank", "Blank", True),
+    ("freeze", "Freeze", True),
+    ("pointer", "Pointer", True),
+    ("highlight", "Pen", True),
+    ("overview", "Overview", True),
+    ("swap-screens", "Swap screens", False),
     None,
-    ("pause-timer", "Pause", QStyle.StandardPixmap.SP_MediaPause, False),
-    ("reset-timer", "Reset", QStyle.StandardPixmap.SP_BrowserReload, False),
-    ("edit-talk-time", "Talk time", None, False),
+    ("pause-timer", "Pause", False),
+    ("reset-timer", "Reset", False),
+    ("edit-talk-time", "Talk time", False),
 ]
+
+# (key, title). Docks can be moved, floated, tabbed, closed and re-shown from "Panes".
+_DOCKS: tuple[tuple[str, str], ...] = (
+    ("next", "Next slide"),
+    ("notes", "Notes"),
+    ("user_notes", "My notes"),
+)
 
 
 class PresenterWindow(QMainWindow):
-    """Dark presenter console. All actions go through `app.dispatch(name)`."""
+    """Presenter console. All actions go through `app.dispatch(name)`."""
 
     def __init__(self, app: PrezApp, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -105,18 +117,27 @@ class PresenterWindow(QMainWindow):
         self.render = app.render
         self.config = app.config
         self.actions: dict[str, QAction] = {}
+        self.docks: dict[str, QDockWidget] = {}
         self._input_mode: str = "goto"
         self._wheel_accum = 0
         self._timer_color = ""
-        self._restored_splitters = False
+        self._restored_layout = False
+        self._sized_docks = False
 
         self.setWindowTitle("prez")
         self.setObjectName("PresenterWindow")
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setDockNestingEnabled(True)
+        self.setDockOptions(
+            QMainWindow.DockOption.AnimatedDocks
+            | QMainWindow.DockOption.AllowNestedDocks
+            | QMainWindow.DockOption.AllowTabbedDocks
+        )
 
         self._build_toolbar()
         self._build_central()
+        self._build_docks()
         self._build_status()
         self._connect_state()
 
@@ -125,6 +146,7 @@ class PresenterWindow(QMainWindow):
         self._msg_timer.timeout.connect(lambda: self.message_label.setText(""))
 
         self.resize(1280, 800)
+        self._default_state = self.saveState(LAYOUT_VERSION)
         self.restore_settings()
 
     # ------------------------------------------------------------------ build
@@ -133,23 +155,32 @@ class PresenterWindow(QMainWindow):
         toolbar = QToolBar("Main", self)
         toolbar.setObjectName("MainToolbar")
         toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(16, 16))
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        style = self.style()
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         for entry in _TOOLBAR:
             if entry is None:
                 toolbar.addSeparator()
                 continue
-            name, label, icon, checkable = entry
+            name, label, checkable = entry
             action = QAction(label, self)
-            if icon is not None:
-                action.setIcon(style.standardIcon(icon))
             action.setCheckable(checkable)
             keys = ", ".join(self.config.shortcuts.get(name, []))
             action.setToolTip(f"{label} ({keys})" if keys else label)
             action.triggered.connect(lambda _checked=False, n=name: self.app.dispatch(n))
             toolbar.addAction(action)
             self.actions[name] = action
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        self.panes_menu = QMenu("Panes", self)
+        self.panes_button = QToolButton()
+        self.panes_button.setText("Panes")
+        self.panes_button.setToolTip("Show, hide or reset the panes (they can also be dragged)")
+        self.panes_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.panes_button.setMenu(self.panes_menu)
+        toolbar.addWidget(self.panes_button)
+
         for button in toolbar.findChildren(QToolButton):
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
@@ -159,42 +190,30 @@ class PresenterWindow(QMainWindow):
         self.current_view = SlideView(self.render, Region.SLIDE)
         self.current_view.set_interactive(True)
         self.current_view.request_priority = 0
+        self.current_view.set_background(theme.CRUST)
         self.current_view.set_pointer_style(self.config.pointer_color, self.config.pointer_size)
         self.current_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.current_view.installEventFilter(self)
 
-        self.next_view = SlideView(self.render, Region.SLIDE)
-        self.next_view.set_interactive(False)
-        self.next_view.request_priority = 0
-
-        self.notes = NotesPane(self.render)
-
-        self.vsplit = QSplitter(Qt.Orientation.Vertical)
-        self.vsplit.setObjectName("RightSplitter")
-        self.vsplit.addWidget(self.next_view)
-        self.vsplit.addWidget(self.notes)
-        self.vsplit.setStretchFactor(0, 4)
-        self.vsplit.setStretchFactor(1, 6)
-
-        self.hsplit = QSplitter(Qt.Orientation.Horizontal)
-        self.hsplit.setObjectName("MainSplitter")
-        self.hsplit.addWidget(self.current_view)
-        self.hsplit.addWidget(self.vsplit)
-        ratio = min(max(self.config.slide_ratio, 0.1), 0.9)
-        self.hsplit.setStretchFactor(0, int(ratio * 100))
-        self.hsplit.setStretchFactor(1, int((1 - ratio) * 100))
-
         self.overview = OverviewWidget(self.render)
 
         self.stack = QStackedWidget()
-        self.stack.addWidget(self.hsplit)
+        self.stack.addWidget(self.current_view)
         self.stack.addWidget(self.overview)
+
+        self.progress = QProgressBar()
+        self.progress.setObjectName("TalkProgress")
+        self.progress.setRange(0, 1000)
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(5)
+        self.progress.hide()
 
         central = QWidget()
         self._central_layout = QVBoxLayout(central)
         self._central_layout.setContentsMargins(0, 0, 0, 0)
         self._central_layout.setSpacing(0)
         self._central_layout.addWidget(self.stack, 1)
+        self._central_layout.addWidget(self.progress)
         self.setCentralWidget(central)
 
         self.current_view.clicked.connect(self._on_view_clicked)
@@ -202,12 +221,47 @@ class PresenterWindow(QMainWindow):
         self.overview.activated.connect(self._on_overview_activated)
         self.overview.closed.connect(self.hide_overview)
 
+    def _build_docks(self) -> None:
+        self.next_view = SlideView(self.render, Region.SLIDE)
+        self.next_view.set_interactive(False)
+        self.next_view.request_priority = 1
+        self.next_view.set_background(theme.CRUST)
+
+        self.notes = NotesPane(self.render, with_editor=False)
+        self.user_notes = UserNotesEditor()
+
+        widgets: dict[str, QWidget] = {
+            "next": self.next_view,
+            "notes": self.notes,
+            "user_notes": self.user_notes,
+        }
+        for key, title in _DOCKS:
+            dock = QDockWidget(title, self)
+            dock.setObjectName(f"Dock_{key}")
+            dock.setWidget(widgets[key])
+            dock.setFeatures(
+                QDockWidget.DockWidgetFeature.DockWidgetMovable
+                | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+                | QDockWidget.DockWidgetFeature.DockWidgetClosable
+            )
+            dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            self.docks[key] = dock
+            toggle = dock.toggleViewAction()
+            toggle.setText(title)
+            self.panes_menu.addAction(toggle)
+
+        self.panes_menu.addSeparator()
+        reset = QAction("Reset layout", self)
+        reset.triggered.connect(self.reset_layout)
+        self.panes_menu.addAction(reset)
+        self.actions["reset-layout"] = reset
+
     def _build_status(self) -> None:
-        row = QWidget()
-        row.setObjectName("StatusRow")
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(8, 4, 8, 2)
-        layout.setSpacing(16)
+        bar = self.statusBar()
+        bar.setObjectName("StatusBar")
+        bar.setSizeGripEnabled(False)
+        bar.setContentsMargins(6, 2, 6, 2)
 
         big = QFont()
         big.setPointSize(16)
@@ -250,23 +304,16 @@ class PresenterWindow(QMainWindow):
         self.clock_label.setFont(big)
         self.clock_label.setToolTip("Wall clock")
 
-        layout.addWidget(self.slide_button)
-        layout.addWidget(self.input_edit)
-        layout.addWidget(self.elapsed_label)
-        layout.addWidget(self.remaining_label)
-        layout.addWidget(self.message_label, 1)
-        layout.addWidget(self.clock_label)
-
-        self.progress = QProgressBar()
-        self.progress.setObjectName("TalkProgress")
-        self.progress.setRange(0, 1000)
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(6)
-        self.progress.hide()
-
-        self._central_layout.addWidget(row)
-        self._central_layout.addWidget(self.progress)
-        self.status_row = row
+        for widget in (
+            self.slide_button,
+            self.input_edit,
+            self.elapsed_label,
+            self.remaining_label,
+        ):
+            bar.addWidget(widget)
+        bar.addWidget(self.message_label, 1)
+        bar.addPermanentWidget(self.clock_label)
+        self.status_row = bar
 
     def _connect_state(self) -> None:
         state = self.state
@@ -284,6 +331,7 @@ class PresenterWindow(QMainWindow):
         self.current_view.set_document(doc)
         self.next_view.set_document(doc)
         self.notes.set_document(doc)
+        self.user_notes.set_document(doc)
         self.overview.set_document(doc)
         if doc is None:
             self.setWindowTitle("prez")
@@ -302,6 +350,7 @@ class PresenterWindow(QMainWindow):
         self.current_view.set_strokes(list(self.state.strokes_for(slide)))
         self.next_view.set_slide(slide + 1 if slide + 1 < doc.slide_count else None)
         self.notes.set_slide(slide)
+        self.user_notes.set_slide(slide)
         self.overview.set_current(slide)
         self.slide_button.setText(f"{slide + 1} / {doc.slide_count}")
         label = doc.labels[slide] if slide < len(doc.labels) else ""
@@ -315,6 +364,10 @@ class PresenterWindow(QMainWindow):
         action = self.actions.get(name)
         if action is not None and action.isCheckable():
             action.setChecked(on)
+
+    def flush_notes(self) -> None:
+        self.notes.flush()
+        self.user_notes.flush()
 
     # ---------------------------------------------------------- interactions
 
@@ -343,6 +396,37 @@ class PresenterWindow(QMainWindow):
             return True
         return super().eventFilter(obj, event)
 
+    def release_text_focus(self) -> bool:
+        """If a text editor in this window has focus, give it back to the slide. True if so."""
+        widget = self.focusWidget()
+        if isinstance(widget, QPlainTextEdit | QTextEdit) and widget is not self.input_edit:
+            self.current_view.setFocus(Qt.FocusReason.OtherFocusReason)
+            return True
+        return False
+
+    # ------------------------------------------------------------------ docks
+
+    def reset_layout(self) -> None:
+        """Default dock arrangement: next slide, notes, my notes stacked on the right."""
+        self.restoreState(self._default_state, LAYOUT_VERSION)
+        for dock in self.docks.values():
+            dock.setFloating(False)
+            dock.show()
+        self._apply_default_dock_sizes()
+
+    def _apply_default_dock_sizes(self) -> None:
+        docks = [self.docks[key] for key, _ in _DOCKS]
+        width = max(self.width(), 10)
+        ratio = min(max(self.config.slide_ratio, 0.1), 0.9)
+        side = int(width * (1 - ratio))
+        self.resizeDocks(docks, [side] * len(docks), Qt.Orientation.Horizontal)
+        height = max(self.centralWidget().height(), 10)
+        self.resizeDocks(
+            docks,
+            [int(height * 0.32), int(height * 0.43), int(height * 0.25)],
+            Qt.Orientation.Vertical,
+        )
+
     # --------------------------------------------------------------- overview
 
     def overview_visible(self) -> bool:
@@ -357,7 +441,7 @@ class PresenterWindow(QMainWindow):
 
     def hide_overview(self) -> None:
         if self.overview_visible():
-            self.stack.setCurrentWidget(self.hsplit)
+            self.stack.setCurrentWidget(self.current_view)
             self.current_view.setFocus()
         self.set_checked("overview", False)
 
@@ -484,12 +568,6 @@ class PresenterWindow(QMainWindow):
             label = "Resume" if paused else "Pause"
             if pause_action.text() != label:
                 pause_action.setText(label)
-                icon = (
-                    QStyle.StandardPixmap.SP_MediaPlay
-                    if paused
-                    else QStyle.StandardPixmap.SP_MediaPause
-                )
-                pause_action.setIcon(self.style().standardIcon(icon))
 
     # --------------------------------------------------------------- messages
 
@@ -502,8 +580,8 @@ class PresenterWindow(QMainWindow):
     def save_settings(self) -> None:
         settings = QSettings("prez", "prez")
         settings.setValue("presenter/geometry", self.saveGeometry())
-        settings.setValue("presenter/hsplitter", self.hsplit.saveState())
-        settings.setValue("presenter/vsplitter", self.vsplit.saveState())
+        settings.setValue("presenter/layout", self.saveState(LAYOUT_VERSION))
+        settings.setValue("presenter/notes_font_pt", self.user_notes.font_point_size())
         settings.sync()
 
     def restore_settings(self) -> None:
@@ -511,23 +589,19 @@ class PresenterWindow(QMainWindow):
         geometry = settings.value("presenter/geometry")
         if geometry:
             self.restoreGeometry(geometry)
-        hsplit = settings.value("presenter/hsplitter")
-        vsplit = settings.value("presenter/vsplitter")
-        if hsplit:
-            self.hsplit.restoreState(hsplit)
-        if vsplit:
-            self.vsplit.restoreState(vsplit)
-        self._restored_splitters = bool(hsplit)
+        layout = settings.value("presenter/layout")
+        self._restored_layout = bool(layout) and self.restoreState(layout, LAYOUT_VERSION)
+        self._sized_docks = self._restored_layout
+        font_pt = settings.value("presenter/notes_font_pt")
+        if font_pt:
+            with contextlib.suppress(TypeError, ValueError):
+                self.user_notes.set_font_point_size(int(font_pt))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        if not self._restored_splitters:
-            self._restored_splitters = True
-            width = max(self.hsplit.width(), 10)
-            ratio = min(max(self.config.slide_ratio, 0.1), 0.9)
-            self.hsplit.setSizes([int(width * ratio), int(width * (1 - ratio))])
-            height = max(self.vsplit.height(), 10)
-            self.vsplit.setSizes([int(height * 0.4), int(height * 0.6)])
+        if not self._sized_docks:
+            self._sized_docks = True
+            QTimer.singleShot(0, self._apply_default_dock_sizes)
 
     # ------------------------------------------------------------ drag & drop
 

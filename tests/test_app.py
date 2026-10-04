@@ -1,5 +1,6 @@
 """Tests for the core-ui modules: state, cli, key dispatch and an offscreen app smoke test."""
 
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -585,12 +586,14 @@ def test_app_smoke(prez_app, qtbot, tmp_path) -> None:
     assert app.presenter.current_view.slide == 1
     assert app.dispatch("freeze") is True
     assert app.state.content_slide == 1
-    assert app.dispatch("pointer") is True
-    assert app.pointer_mode is True
+    assert app.pointer_mode is True  # on by default (config.pointer_on)
     app.presenter.current_view.pointer_moved.emit((0.5, 0.5))
     assert app.state.pointer == (0.5, 0.5)
     assert app.dispatch("pointer") is True
+    assert app.pointer_mode is False
     assert app.state.pointer is None
+    assert app.dispatch("pointer") is True
+    assert app.pointer_mode is True
     assert app.dispatch("overview") is True
     assert app.presenter.overview_visible()
     assert app.dispatch("overview") is True
@@ -747,3 +750,78 @@ def test_choose_screens_single(qapp) -> None:
     assert line.startswith(content.name())
     assert f"{geo.width()}x{geo.height()}@{geo.x()},{geo.y()}" in line
     assert line.endswith("primary")
+
+
+# ------------------------------------------------------------------ presenter layout
+
+
+def test_toolbar_has_no_icons(prez_app) -> None:
+    for name, action in prez_app.presenter.actions.items():
+        assert action.icon().isNull(), name
+
+
+def test_docks_are_editable(prez_app, qtbot) -> None:
+    from PySide6.QtWidgets import QDockWidget
+
+    presenter = prez_app.presenter
+    presenter.show()
+    qtbot.waitExposed(presenter)
+    assert set(presenter.docks) == {"next", "notes", "user_notes"}
+    for dock in presenter.docks.values():
+        features = dock.features()
+        assert features & QDockWidget.DockWidgetFeature.DockWidgetMovable
+        assert features & QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        assert features & QDockWidget.DockWidgetFeature.DockWidgetClosable
+    # closing a dock and resetting the layout brings it back
+    presenter.docks["notes"].close()
+    assert not presenter.docks["notes"].isVisible()
+    presenter.actions["reset-layout"].trigger()
+    assert presenter.docks["notes"].isVisible()
+    # the Panes menu lists a toggle per dock plus the reset entry
+    texts = [a.text() for a in presenter.panes_menu.actions() if a.text()]
+    assert texts == ["Next slide", "Notes", "My notes", "Reset layout"]
+
+
+def test_user_notes_dock_persists(prez_app, qtbot, tmp_path) -> None:
+    from prez.widgets.notes_view import notes_path_for
+
+    presenter = prez_app.presenter
+    editor = presenter.user_notes.editor()
+    assert editor.isEnabled()
+    prez_app.state.goto(2)
+    editor.setPlainText("remember the joke")
+    presenter.flush_notes()
+    path = notes_path_for(prez_app.doc.path)
+    assert os.path.exists(path)
+    with open(path, encoding="utf-8") as fh:
+        assert json.load(fh) == {"2": "remember the joke"}
+    os.remove(path)
+
+
+def test_escape_leaves_text_editor(prez_app, qtbot) -> None:
+    presenter = prez_app.presenter
+    presenter.show()
+    qtbot.waitExposed(presenter)
+    presenter.user_notes.focus_editor()
+    assert presenter.focusWidget() is presenter.user_notes.editor()
+    assert prez_app.dispatch("cancel") is True
+    assert presenter.focusWidget() is presenter.current_view
+
+
+def test_pointer_on_by_default_and_configurable(prez_app) -> None:
+    from prez.config import Config
+
+    assert Config().pointer_on is True
+    assert prez_app.pointer_mode is True
+    assert prez_app.presenter.actions["pointer"].isChecked()
+
+
+def test_theme_uses_foot_palette(prez_app) -> None:
+    from PySide6.QtGui import QPalette
+
+    from prez import theme
+
+    palette = prez_app.qapp.palette()
+    assert palette.color(QPalette.ColorRole.Window).name() == theme.BASE
+    assert palette.color(QPalette.ColorRole.Highlight).name() == theme.PEACH
+    assert theme.BASE == "#24273a"  # foot background

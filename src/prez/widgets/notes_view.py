@@ -1,9 +1,13 @@
-"""NotesPane: shows the notes region of the slide, or annotation + free-text notes.
+"""Notes widgets.
 
-When the document has a notes region (beamer "show notes on second screen"), page 0 of
-the internal stack is a non-interactive ``SlideView(Region.NOTES)``. Otherwise page 1
-shows the PDF text annotations of the slide (read-only) above an editable text box
-whose content is persisted to ``<pdf path>.notes.json`` as ``{"<slide>": "text"}``.
+``NotesPane`` shows what the PDF itself carries: the notes region of the slide (Beamer
+"show notes on second screen") or, failing that, the slide's text annotations.
+``UserNotesEditor`` is the user's own editable per-slide text, persisted next to the PDF
+as ``<pdf path>.notes.json`` (``{"<slide>": "text"}``).
+
+For backwards compatibility ``NotesPane(with_editor=True)`` (the default) embeds a
+``UserNotesEditor`` under the annotations, as the first version did; the presenter window
+uses ``with_editor=False`` and a separate editor dock.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QFont, QWheelEvent
 from PySide6.QtWidgets import (
+    QLabel,
     QPlainTextEdit,
     QSplitter,
     QStackedWidget,
@@ -23,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from prez import theme
 from prez.document import Region
 from prez.widgets.slide_view import SlideView
 
@@ -36,11 +42,11 @@ SAVE_DEBOUNCE_MS = 500
 DEFAULT_FONT_PT = 14
 MIN_FONT_PT = 6
 MAX_FONT_PT = 72
-BG = "#202124"
-FG = "#e8eaed"
+BG = theme.BASE
+FG = theme.TEXT
 _STYLE = (
-    f"QPlainTextEdit {{ background: {BG}; color: {FG}; border: none; "
-    f"selection-background-color: #8ab4f8; selection-color: #202124; }}"
+    f"QPlainTextEdit {{ background: {BG}; color: {FG}; border: none; padding: 4px; "
+    f"selection-background-color: {theme.SELECTION}; selection-color: {FG}; }}"
 )
 
 
@@ -70,14 +76,12 @@ class _NotesEdit(QPlainTextEdit):
         super().wheelEvent(event)
 
 
-class NotesPane(QWidget):
-    """If doc.has_notes(): a SlideView(Region.NOTES). Else: annotations text (read-only,
-    top) + editable per-slide text notes persisted to ``<pdf>.notes.json``."""
+class UserNotesEditor(QWidget):
+    """Editable per-slide notes, saved (debounced) to ``<pdf>.notes.json``."""
 
-    PAGE_SLIDE = 0
-    PAGE_TEXT = 1
+    font_changed = Signal(int)
 
-    def __init__(self, render: RenderService, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._doc: DocumentInfo | None = None
         self._slide = 0
@@ -87,43 +91,16 @@ class NotesPane(QWidget):
         self._warned = False
         self._font_pt = DEFAULT_FONT_PT
 
-        self._view = SlideView(render, Region.NOTES)
-        self._view.set_interactive(False)
-
-        self._annotations = _NotesEdit()
-        self._annotations.setReadOnly(True)
-        self._annotations.setPlaceholderText("")
-        self._annotations.setStyleSheet(_STYLE)
-        self._annotations.setFrameShape(QPlainTextEdit.Shape.NoFrame)
-
         self._editor = _NotesEdit()
-        self._editor.setPlaceholderText("Notes for this slide…")
+        self._editor.setPlaceholderText("Your notes for this slide…")
         self._editor.setStyleSheet(_STYLE)
         self._editor.setFrameShape(QPlainTextEdit.Shape.NoFrame)
         self._editor.setTabChangesFocus(True)
         self._editor.setEnabled(False)
 
-        self._splitter = QSplitter(Qt.Orientation.Vertical)
-        self._splitter.addWidget(self._annotations)
-        self._splitter.addWidget(self._editor)
-        self._splitter.setStretchFactor(0, 1)
-        self._splitter.setStretchFactor(1, 2)
-        self._splitter.setChildrenCollapsible(False)
-
-        text_page = QWidget()
-        text_layout = QVBoxLayout(text_page)
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.addWidget(self._splitter)
-        text_page.setStyleSheet(f"background: {BG};")
-
-        self._stack = QStackedWidget(self)
-        self._stack.addWidget(self._view)
-        self._stack.addWidget(text_page)
-        self._stack.setCurrentIndex(self.PAGE_TEXT)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._stack)
+        layout.addWidget(self._editor)
 
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -132,7 +109,6 @@ class NotesPane(QWidget):
 
         self._editor.textChanged.connect(self._on_text_changed)
         self._editor.zoom_requested.connect(self._zoom)
-        self._annotations.zoom_requested.connect(self._zoom)
         self._apply_font()
 
     # --------------------------------------------------------------------- API
@@ -143,15 +119,11 @@ class NotesPane(QWidget):
         self._notes = self._load_notes()
         self._dirty = False
         self._warned = False
-        self._view.set_document(doc)
-        has_notes = bool(doc is not None and doc.has_notes())
-        self._stack.setCurrentIndex(self.PAGE_SLIDE if has_notes else self.PAGE_TEXT)
         self._editor.setEnabled(doc is not None)
         self._show_slide()
 
     def set_slide(self, slide: int) -> None:
         self._slide = int(slide)
-        self._view.set_slide(self._slide)
         self._show_slide()
 
     def slide(self) -> int:
@@ -161,16 +133,6 @@ class NotesPane(QWidget):
         """Save pending edits now."""
         self._save_timer.stop()
         self._save()
-
-    def slide_view(self) -> SlideView | None:
-        """The notes SlideView when the document has a notes region, else None."""
-        if self._doc is not None and self._doc.has_notes():
-            return self._view
-        return None
-
-    def current_page(self) -> int:
-        """``PAGE_SLIDE`` or ``PAGE_TEXT``."""
-        return self._stack.currentIndex()
 
     def notes_path(self) -> str | None:
         return notes_path_for(self._doc.path) if self._doc is not None else None
@@ -182,32 +144,26 @@ class NotesPane(QWidget):
     def editor(self) -> QPlainTextEdit:
         return self._editor
 
-    def annotations_view(self) -> QPlainTextEdit:
-        return self._annotations
-
     def font_point_size(self) -> int:
         return self._font_pt
 
     def set_font_point_size(self, points: int) -> None:
-        self._font_pt = min(max(int(points), MIN_FONT_PT), MAX_FONT_PT)
+        points = min(max(int(points), MIN_FONT_PT), MAX_FONT_PT)
+        if points == self._font_pt:
+            return
+        self._font_pt = points
         self._apply_font()
+        self.font_changed.emit(points)
+
+    def focus_editor(self) -> None:
+        self._editor.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # ----------------------------------------------------------------- helpers
 
     def _show_slide(self) -> None:
-        doc = self._doc
-        slide = self._slide
-        annotations: list[str] = []
-        if doc is not None and 0 <= slide < doc.slide_count:
-            try:
-                annotations = [str(a) for a in doc.annotations[slide] if a]
-            except (IndexError, AttributeError, TypeError):
-                annotations = []
-        self._annotations.setPlainText("\n\n".join(annotations))
-        self._annotations.setVisible(bool(annotations))
         self._loading = True
         try:
-            self._editor.setPlainText(self._notes.get(str(slide), ""))
+            self._editor.setPlainText(self._notes.get(str(self._slide), ""))
         finally:
             self._loading = False
 
@@ -270,6 +226,163 @@ class NotesPane(QWidget):
         font = QFont(self.font())
         font.setPointSize(self._font_pt)
         self._editor.setFont(font)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt override)
+        self.flush()
+        super().closeEvent(event)
+
+
+class NotesPane(QWidget):
+    """The PDF's notes: a ``SlideView(Region.NOTES)`` when the document has a notes
+    region, else the slide's text annotations (read-only). With ``with_editor`` a
+    ``UserNotesEditor`` sits under the annotations."""
+
+    PAGE_SLIDE = 0
+    PAGE_TEXT = 1
+
+    def __init__(
+        self, render: RenderService, parent: QWidget | None = None, *, with_editor: bool = True
+    ) -> None:
+        super().__init__(parent)
+        self._doc: DocumentInfo | None = None
+        self._slide = 0
+        self._font_pt = DEFAULT_FONT_PT
+
+        self._view = SlideView(render, Region.NOTES)
+        self._view.set_interactive(False)
+        self._view.set_background(theme.CRUST)
+
+        self._annotations = _NotesEdit()
+        self._annotations.setReadOnly(True)
+        self._annotations.setPlaceholderText("")
+        self._annotations.setStyleSheet(_STYLE)
+        self._annotations.setFrameShape(QPlainTextEdit.Shape.NoFrame)
+
+        self._placeholder = QLabel("No notes in this PDF")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet(f"color: {theme.OVERLAY0}; background: {BG};")
+
+        self._user: UserNotesEditor | None = UserNotesEditor() if with_editor else None
+
+        self._splitter = QSplitter(Qt.Orientation.Vertical)
+        self._splitter.addWidget(self._annotations)
+        if self._user is not None:
+            self._splitter.addWidget(self._user)
+            self._splitter.setStretchFactor(0, 1)
+            self._splitter.setStretchFactor(1, 2)
+            self._user.font_changed.connect(self._on_user_font)
+        self._splitter.setChildrenCollapsible(False)
+
+        text_page = QWidget()
+        text_layout = QVBoxLayout(text_page)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.addWidget(self._splitter)
+        text_layout.addWidget(self._placeholder, 1)
+        text_page.setStyleSheet(f"background: {BG};")
+
+        self._stack = QStackedWidget(self)
+        self._stack.addWidget(self._view)
+        self._stack.addWidget(text_page)
+        self._stack.setCurrentIndex(self.PAGE_TEXT)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._stack)
+
+        self._annotations.zoom_requested.connect(self._zoom)
+        self._apply_font()
+        self._show_slide()
+
+    # --------------------------------------------------------------------- API
+
+    def set_document(self, doc: DocumentInfo | None) -> None:
+        self.flush()
+        self._doc = doc
+        self._view.set_document(doc)
+        if self._user is not None:
+            self._user.set_document(doc)
+        has_notes = bool(doc is not None and doc.has_notes())
+        self._stack.setCurrentIndex(self.PAGE_SLIDE if has_notes else self.PAGE_TEXT)
+        self._show_slide()
+
+    def set_slide(self, slide: int) -> None:
+        self._slide = int(slide)
+        self._view.set_slide(self._slide)
+        if self._user is not None:
+            self._user.set_slide(self._slide)
+        self._show_slide()
+
+    def slide(self) -> int:
+        return self._slide
+
+    def flush(self) -> None:
+        """Save pending user-note edits now (no-op without an embedded editor)."""
+        if self._user is not None:
+            self._user.flush()
+
+    def slide_view(self) -> SlideView | None:
+        """The notes SlideView when the document has a notes region, else None."""
+        if self._doc is not None and self._doc.has_notes():
+            return self._view
+        return None
+
+    def current_page(self) -> int:
+        """``PAGE_SLIDE`` or ``PAGE_TEXT``."""
+        return self._stack.currentIndex()
+
+    def user_notes(self) -> UserNotesEditor | None:
+        return self._user
+
+    def notes_path(self) -> str | None:
+        if self._user is not None:
+            return self._user.notes_path()
+        return notes_path_for(self._doc.path) if self._doc is not None else None
+
+    def notes(self) -> dict[str, str]:
+        return self._user.notes() if self._user is not None else {}
+
+    def editor(self) -> QPlainTextEdit:
+        """The user-notes editor (the annotations view when there is no editor)."""
+        return self._user.editor() if self._user is not None else self._annotations
+
+    def annotations_view(self) -> QPlainTextEdit:
+        return self._annotations
+
+    def font_point_size(self) -> int:
+        return self._font_pt
+
+    def set_font_point_size(self, points: int) -> None:
+        self._font_pt = min(max(int(points), MIN_FONT_PT), MAX_FONT_PT)
+        self._apply_font()
+        if self._user is not None:
+            self._user.set_font_point_size(self._font_pt)
+
+    # ----------------------------------------------------------------- helpers
+
+    def _show_slide(self) -> None:
+        doc = self._doc
+        slide = self._slide
+        annotations: list[str] = []
+        if doc is not None and 0 <= slide < doc.slide_count:
+            try:
+                annotations = [str(a) for a in doc.annotations[slide] if a]
+            except (IndexError, AttributeError, TypeError):
+                annotations = []
+        self._annotations.setPlainText("\n\n".join(annotations))
+        self._annotations.setVisible(bool(annotations))
+        self._placeholder.setVisible(self._user is None and not annotations)
+
+    def _on_user_font(self, points: int) -> None:
+        if points != self._font_pt:
+            self._font_pt = points
+            self._apply_font()
+
+    def _zoom(self, steps: int) -> None:
+        self.set_font_point_size(self._font_pt + steps)
+
+    def _apply_font(self) -> None:
+        font = QFont(self.font())
+        font.setPointSize(self._font_pt)
         self._annotations.setFont(font)
 
     # ------------------------------------------------------------------ events

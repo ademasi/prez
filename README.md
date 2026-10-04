@@ -88,3 +88,19 @@ Architecture is documented in `docs/SPEC.md`. Modules:
 - `app.py` wiring, keyboard dispatch, prerender policy, screen handling; `cli.py` entry point
 
 Not implemented (yet): embedded video, zoom.
+
+## Wayland and tiling compositors
+
+With two screens the content window goes fullscreen on the non-primary screen (or
+`--content-screen NAME`) and the presenter opens on the other one. Wayland does not let an
+application choose where a *windowed* toplevel appears, so under sway or Hyprland the
+presenter opens as a tile on the focused output. The windows have `app_id` `prez`; the
+presenter's title is `<file> — prez` and the content window's is `prez — content`, so a
+rule such as
+
+```
+for_window [app_id="prez" title="prez — content"] fullscreen enable
+for_window [app_id="prez" title=" — prez$"] move workspace 9
+```
+
+puts them where you like. Pressing `S` swaps the two screens at any time.

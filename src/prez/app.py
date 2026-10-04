@@ -194,6 +194,7 @@ class PrezApp(QObject):
         else:
             self.qapp = QApplication(list(argv) or ["prez"])
         self.qapp.setApplicationName("prez")
+        self.qapp.setDesktopFileName("prez")  # Wayland app_id, for compositor window rules
         self.qapp.setOrganizationName("prez")
         apply_dark_theme(self.qapp)
         super().__init__(self.qapp)

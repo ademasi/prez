@@ -8,9 +8,7 @@ when those are not available yet.
 
 from __future__ import annotations
 
-import json
 import os
-import stat
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -22,7 +20,6 @@ from PySide6.QtGui import QColor, QMouseEvent, QPixmap, QWheelEvent  # noqa: E40
 
 from prez.document import Link, Region  # noqa: E402
 from prez.widgets import NotesPane, OverviewWidget, SlideView  # noqa: E402
-from prez.widgets.notes_view import notes_path_for  # noqa: E402
 from prez.widgets.slide_view import parse_color  # noqa: E402
 
 FILL = QColor(40, 120, 200)  # colour the fake renderer paints every slide with
@@ -591,10 +588,6 @@ def text_doc(tmp_path) -> FakeDoc:
     return d
 
 
-def test_notes_path():
-    assert notes_path_for("/x/deck.pdf") == "/x/deck.pdf.notes.json"
-
-
 def test_notes_pane_text_mode_shows_annotations(qtbot, text_doc):
     pane = NotesPane(FakeRenderService(text_doc))
     qtbot.addWidget(pane)
@@ -608,96 +601,7 @@ def test_notes_pane_text_mode_shows_annotations(qtbot, text_doc):
     assert pane.annotations_view().toPlainText() == "Note A\n\nNote B"
     pane.set_slide(1)
     assert not pane.annotations_view().isVisible()
-    assert pane.editor().font().pointSize() >= 14
-
-
-def test_notes_pane_saves_and_loads(qtbot, text_doc):
-    pane = NotesPane(FakeRenderService(text_doc))
-    qtbot.addWidget(pane)
-    pane.set_document(text_doc)
-    pane.set_slide(1)
-    pane.editor().setPlainText("hello")
-    pane.set_slide(2)
-    assert pane.editor().toPlainText() == ""
-    pane.editor().setPlainText("world")
-    pane.set_slide(1)
-    assert pane.editor().toPlainText() == "hello"
-    path = pane.notes_path()
-    assert path == notes_path_for(text_doc.path)
-    assert not os.path.exists(path)  # debounced, not yet written
-    pane.flush()
-    with open(path, encoding="utf-8") as fh:
-        assert json.load(fh) == {"1": "hello", "2": "world"}
-
-    other = NotesPane(FakeRenderService(text_doc))
-    qtbot.addWidget(other)
-    other.set_document(text_doc)
-    other.set_slide(2)
-    assert other.editor().toPlainText() == "world"
-    other.set_slide(1)
-    assert other.editor().toPlainText() == "hello"
-    # Clearing a note removes its key.
-    other.editor().setPlainText("")
-    other.flush()
-    with open(path, encoding="utf-8") as fh:
-        assert json.load(fh) == {"2": "world"}
-
-
-def test_notes_pane_debounced_autosave(qtbot, text_doc):
-    pane = NotesPane(FakeRenderService(text_doc))
-    qtbot.addWidget(pane)
-    pane.set_document(text_doc)
-    pane.set_slide(0)
-    pane.editor().setPlainText("auto")
-    path = pane.notes_path()
-    assert not os.path.exists(path)
-    qtbot.waitUntil(lambda: os.path.exists(path), timeout=3000)
-    with open(path, encoding="utf-8") as fh:
-        assert json.load(fh) == {"0": "auto"}
-
-
-def test_notes_pane_set_document_flushes_previous(qtbot, text_doc, tmp_path):
-    pane = NotesPane(FakeRenderService(text_doc))
-    qtbot.addWidget(pane)
-    pane.set_document(text_doc)
-    pane.set_slide(3)
-    pane.editor().setPlainText("bye")
-    other = FakeDoc(slide_count=2, path=str(tmp_path / "other.pdf"))
-    pane.set_document(other)
-    assert pane.editor().toPlainText() == ""
-    with open(notes_path_for(text_doc.path), encoding="utf-8") as fh:
-        assert json.load(fh) == {"3": "bye"}
-
-
-def test_notes_pane_ignores_corrupt_json(qtbot, text_doc, caplog):
-    with open(notes_path_for(text_doc.path), "w", encoding="utf-8") as fh:
-        fh.write("{not json")
-    pane = NotesPane(FakeRenderService(text_doc))
-    qtbot.addWidget(pane)
-    with caplog.at_level("WARNING", logger="prez.widgets.notes_view"):
-        pane.set_document(text_doc)
-    assert pane.notes() == {}
-    assert "Cannot read notes file" in caplog.text
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
-def test_notes_pane_readonly_dir_logs_warning(qtbot, text_doc, tmp_path, caplog):
-    pane = NotesPane(FakeRenderService(text_doc))
-    qtbot.addWidget(pane)
-    pane.set_document(text_doc)
-    pane.set_slide(0)
-    pane.editor().setPlainText("cannot save")
-    mode = stat.S_IMODE(os.stat(tmp_path).st_mode)
-    os.chmod(tmp_path, stat.S_IRUSR | stat.S_IXUSR)
-    try:
-        with caplog.at_level("WARNING", logger="prez.widgets.notes_view"):
-            pane.flush()
-            pane.editor().setPlainText("still cannot")
-            pane.flush()
-    finally:
-        os.chmod(tmp_path, mode)
-    assert caplog.text.count("Cannot save notes") == 1  # warned once per document
-    assert not os.path.exists(pane.notes_path())
+    assert pane.annotations_view().font().pointSize() >= 14
 
 
 def test_notes_pane_slide_view_mode(qtbot):
@@ -742,12 +646,11 @@ def test_notes_pane_ctrl_wheel_zooms(qtbot, text_doc):
             False,
         )
 
-    send(pane.editor().viewport(), wheel(120))
+    send(pane.annotations_view().viewport(), wheel(120))
     assert pane.font_point_size() == before + 1
-    assert pane.editor().font().pointSize() == before + 1
     assert pane.annotations_view().font().pointSize() == before + 1
-    send(pane.editor().viewport(), wheel(-120))
-    send(pane.editor().viewport(), wheel(-120))
+    send(pane.annotations_view().viewport(), wheel(-120))
+    send(pane.annotations_view().viewport(), wheel(-120))
     assert pane.font_point_size() == before - 1
 
 

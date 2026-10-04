@@ -537,3 +537,10 @@ Deviations from the contract above that are now the de-facto interface:
 - `PresenterWindow.release_text_focus()` is the first step of the `cancel` action.
 - `prez/theme.py`: Catppuccin Macchiato (foot) palette + Claude orange accent, applied as
   `QPalette` + stylesheet by `apply_theme`; all widget colours import from it.
+
+### Third pass (2026-10-04)
+
+- The user-notes editor (`UserNotesEditor`, `<pdf>.notes.json`) is gone: notes come from
+  the PDF only. `NotesPane(render)` shows the notes region, else annotations, else a
+  placeholder. Docks are **Next slide** and **Notes** (`LAYOUT_VERSION = 3`).
+- Toolbar no longer has Open / Prev / Next; those remain keyboard actions (`O`, arrows).

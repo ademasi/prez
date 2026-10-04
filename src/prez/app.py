@@ -253,10 +253,6 @@ class PrezApp(QObject):
         self._reload_timer.stop()
         self._screen_timer.stop()
         try:
-            self.presenter.flush_notes()
-        except Exception:
-            log.exception("flushing notes failed")
-        try:
             self.presenter.save_settings()
         except Exception:
             log.exception("saving settings failed")

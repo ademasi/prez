@@ -36,8 +36,7 @@ Or install it as a tool: `uv tool install --editable .` then `prez talk.pdf`.
 | `right` / `left` / `top` / `bottom` | page is split, notes on that side (Beamer `\setbeameroption{show notes on second screen=right}`) |
 | `after`   | slide page, then its notes page, alternating |
 
-When the PDF has no notes, the notes pane shows the PDF annotations of the slide and a text
-editor; what you type is saved next to the PDF in `talk.pdf.notes.json`.
+When the PDF has no notes region, the notes pane shows the slide's PDF annotations.
 
 ## Keys (pympress defaults)
 
@@ -57,7 +56,7 @@ editor; what you type is saved next to the PDF in `talk.pdf.notes.json`.
 | Content fullscreen / presenter fullscreen | `F11` `F` `F5` / `Ctrl+F` |
 | Swap screens | `S` |
 | Timer pause / reset / set talk time | `P` / `R` / `T` |
-| Open file / reload | `O` / `Ctrl+Shift+R` (the file is also reloaded automatically when it changes) |
+| Open file / reload | `O` / `Ctrl+Shift+R` (the file is also reloaded automatically when it is recompiled) |
 | Quit | `Q` |
 
 The laser pointer is on from the start (it follows the mouse over the current slide and
@@ -69,12 +68,12 @@ fullscreen.
 
 ## Presenter layout
 
-The current slide is the centre of the presenter window. **Next slide**, **Notes** (what the
-PDF carries: the Beamer notes half or the slide's annotations) and **My notes** (your own
-text, saved as `talk.pdf.notes.json`) are panes you can drag to any edge, stack as tabs,
-float as separate windows, resize or close. The **Panes** menu at the right of the toolbar
-re-opens closed panes and has *Reset layout*. The arrangement is remembered between runs.
-Click into *My notes* to type; `Escape` returns the keyboard to the slides.
+The current slide is the centre of the presenter window. **Next slide** and **Notes** (the
+Beamer notes half of the page, or the slide's PDF annotations) are panes you can drag to
+any edge, stack as tabs, float as separate windows, resize or close. The **Panes** menu at
+the right of the toolbar re-opens closed panes and has *Reset layout*. The arrangement is
+remembered between runs. The toolbar only carries toggles and the timer; navigation and
+opening files are keyboard and command-line matters.
 
 Colours follow the Catppuccin Macchiato palette of your foot terminal, with Claude's orange
 as the accent, in `src/prez/theme.py`.
@@ -98,7 +97,7 @@ Architecture is documented in `docs/SPEC.md`. Modules:
 - `document.py` document model (regions, labels, links, annotations) and the MuPDF renderer
 - `render.py` worker thread, priority queue, LRU pixmap cache
 - `state.py` presentation state and signals (slide, blank, freeze, pointer, strokes, history)
-- `widgets/` slide view with overlays, overview grid, notes pane and user-notes editor
+- `widgets/` slide view with overlays, overview grid, notes pane
 - `theme.py` palette and stylesheet
 - `windows/` content and presenter windows
 - `app.py` wiring, keyboard dispatch, prerender policy, screen handling; `cli.py` entry point

@@ -1,6 +1,5 @@
 """Tests for the core-ui modules: state, cli, key dispatch and an offscreen app smoke test."""
 
-import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -766,7 +765,7 @@ def test_docks_are_editable(prez_app, qtbot) -> None:
     presenter = prez_app.presenter
     presenter.show()
     qtbot.waitExposed(presenter)
-    assert set(presenter.docks) == {"next", "notes", "user_notes"}
+    assert set(presenter.docks) == {"next", "notes"}
     for dock in presenter.docks.values():
         features = dock.features()
         assert features & QDockWidget.DockWidgetFeature.DockWidgetMovable
@@ -779,33 +778,26 @@ def test_docks_are_editable(prez_app, qtbot) -> None:
     assert presenter.docks["notes"].isVisible()
     # the Panes menu lists a toggle per dock plus the reset entry
     texts = [a.text() for a in presenter.panes_menu.actions() if a.text()]
-    assert texts == ["Next slide", "Notes", "My notes", "Reset layout"]
+    assert texts == ["Next slide", "Notes", "Reset layout"]
 
 
-def test_user_notes_dock_persists(prez_app, qtbot, tmp_path) -> None:
-    from prez.widgets.notes_view import notes_path_for
-
-    presenter = prez_app.presenter
-    editor = presenter.user_notes.editor()
-    assert editor.isEnabled()
-    prez_app.state.goto(2)
-    editor.setPlainText("remember the joke")
-    presenter.flush_notes()
-    path = notes_path_for(prez_app.doc.path)
-    assert os.path.exists(path)
-    with open(path, encoding="utf-8") as fh:
-        assert json.load(fh) == {"2": "remember the joke"}
-    os.remove(path)
-
-
-def test_escape_leaves_text_editor(prez_app, qtbot) -> None:
+def test_escape_leaves_text_view(prez_app, qtbot) -> None:
     presenter = prez_app.presenter
     presenter.show()
     qtbot.waitExposed(presenter)
-    presenter.user_notes.focus_editor()
-    assert presenter.focusWidget() is presenter.user_notes.editor()
+    prez_app.state.goto(2)  # the fixture deck has an annotation on slide 3
+    view = presenter.notes.annotations_view()
+    assert view.isVisible()
+    view.setFocus(Qt.FocusReason.OtherFocusReason)
+    assert presenter.focusWidget() is view
     assert prez_app.dispatch("cancel") is True
     assert presenter.focusWidget() is presenter.current_view
+
+
+def test_toolbar_has_no_open_prev_next(prez_app) -> None:
+    names = set(prez_app.presenter.actions)
+    assert not names & {"pick-file", "prev", "next"}
+    assert prez_app.dispatch("next") is True  # keyboard/dispatch still work
 
 
 def test_pointer_on_by_default_and_configurable(prez_app) -> None:

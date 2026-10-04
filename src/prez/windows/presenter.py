@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 
 from prez import theme
 from prez.document import Region
-from prez.widgets.notes_view import NotesPane, UserNotesEditor
+from prez.widgets.notes_view import NotesPane
 from prez.widgets.overview import OverviewWidget
 from prez.widgets.slide_view import SlideView
 
@@ -53,7 +53,7 @@ MUTED = theme.SUBTEXT0
 
 MESSAGE_MS = 3000
 WHEEL_STEP = 120
-LAYOUT_VERSION = 2  # bump when the dock set changes, so stale saved layouts are ignored
+LAYOUT_VERSION = 3  # bump when the dock set changes, so stale saved layouts are ignored
 
 
 class ClickableLabel(QLabel):
@@ -82,11 +82,6 @@ class InputEdit(QLineEdit):
 
 # (action, label, checkable); None is a separator. Text only, no icons.
 _TOOLBAR: list[tuple[str, str, bool] | None] = [
-    ("pick-file", "Open", False),
-    None,
-    ("prev", "Prev", False),
-    ("next", "Next", False),
-    None,
     ("blank", "Blank", True),
     ("freeze", "Freeze", True),
     ("pointer", "Pointer", True),
@@ -103,7 +98,6 @@ _TOOLBAR: list[tuple[str, str, bool] | None] = [
 _DOCKS: tuple[tuple[str, str], ...] = (
     ("next", "Next slide"),
     ("notes", "Notes"),
-    ("user_notes", "My notes"),
 )
 
 
@@ -227,13 +221,11 @@ class PresenterWindow(QMainWindow):
         self.next_view.request_priority = 1
         self.next_view.set_background(theme.CRUST)
 
-        self.notes = NotesPane(self.render, with_editor=False)
-        self.user_notes = UserNotesEditor()
+        self.notes = NotesPane(self.render)
 
         widgets: dict[str, QWidget] = {
             "next": self.next_view,
             "notes": self.notes,
-            "user_notes": self.user_notes,
         }
         for key, title in _DOCKS:
             dock = QDockWidget(title, self)
@@ -331,7 +323,6 @@ class PresenterWindow(QMainWindow):
         self.current_view.set_document(doc)
         self.next_view.set_document(doc)
         self.notes.set_document(doc)
-        self.user_notes.set_document(doc)
         self.overview.set_document(doc)
         if doc is None:
             self.setWindowTitle("prez")
@@ -350,7 +341,6 @@ class PresenterWindow(QMainWindow):
         self.current_view.set_strokes(list(self.state.strokes_for(slide)))
         self.next_view.set_slide(slide + 1 if slide + 1 < doc.slide_count else None)
         self.notes.set_slide(slide)
-        self.user_notes.set_slide(slide)
         self.overview.set_current(slide)
         self.slide_button.setText(f"{slide + 1} / {doc.slide_count}")
         label = doc.labels[slide] if slide < len(doc.labels) else ""
@@ -364,10 +354,6 @@ class PresenterWindow(QMainWindow):
         action = self.actions.get(name)
         if action is not None and action.isCheckable():
             action.setChecked(on)
-
-    def flush_notes(self) -> None:
-        self.notes.flush()
-        self.user_notes.flush()
 
     # ---------------------------------------------------------- interactions
 
@@ -421,11 +407,7 @@ class PresenterWindow(QMainWindow):
         side = int(width * (1 - ratio))
         self.resizeDocks(docks, [side] * len(docks), Qt.Orientation.Horizontal)
         height = max(self.centralWidget().height(), 10)
-        self.resizeDocks(
-            docks,
-            [int(height * 0.32), int(height * 0.43), int(height * 0.25)],
-            Qt.Orientation.Vertical,
-        )
+        self.resizeDocks(docks, [int(height * 0.4), int(height * 0.6)], Qt.Orientation.Vertical)
 
     # --------------------------------------------------------------- overview
 
@@ -581,7 +563,7 @@ class PresenterWindow(QMainWindow):
         settings = QSettings("prez", "prez")
         settings.setValue("presenter/geometry", self.saveGeometry())
         settings.setValue("presenter/layout", self.saveState(LAYOUT_VERSION))
-        settings.setValue("presenter/notes_font_pt", self.user_notes.font_point_size())
+        settings.setValue("presenter/notes_font_pt", self.notes.font_point_size())
         settings.sync()
 
     def restore_settings(self) -> None:
@@ -595,7 +577,7 @@ class PresenterWindow(QMainWindow):
         font_pt = settings.value("presenter/notes_font_pt")
         if font_pt:
             with contextlib.suppress(TypeError, ValueError):
-                self.user_notes.set_font_point_size(int(font_pt))
+                self.notes.set_font_point_size(int(font_pt))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

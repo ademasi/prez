@@ -294,7 +294,7 @@ class TestAfter:
 
     def test_per_slide_lists(self, after_pdf: str):
         doc = load_document(after_pdf, "after")
-        assert doc.labels == ["1", "3", "5"]  # no page labels: PDF page number of the slide page
+        assert doc.labels == ["1", "2", "3"]  # no page labels: numbered by slide, not PDF page
         assert len(doc.links) == 3
         assert len(doc.annotations) == 3
         with pytest.raises(IndexError):

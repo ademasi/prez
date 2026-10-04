@@ -299,7 +299,7 @@ def load_document(path: str, notes_mode: NotesMode | str = "auto") -> DocumentIn
             page_index = info.page_for_slide(slide)
             page = doc[page_index]
             _, clip = info.region(slide, Region.SLIDE)
-            info.labels.append(_page_label(page) or str(page_index + 1))
+            info.labels.append(_page_label(page) or str(slide + 1))
             info.links.append(_extract_links(page, clip, info))
             info.annotations.append(_extract_annotations(page))
         info.outline = _extract_outline(doc, info)

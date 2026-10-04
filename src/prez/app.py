@@ -7,7 +7,15 @@ import os
 from collections.abc import Callable
 from functools import partial
 
-from PySide6.QtCore import QEvent, QFileSystemWatcher, QKeyCombination, QObject, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QFileSystemWatcher,
+    QKeyCombination,
+    QLoggingCategory,
+    QObject,
+    Qt,
+    QTimer,
+)
 from PySide6.QtGui import QKeyEvent, QKeySequence, QScreen
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from prez import theme
+from prez import desktop, theme
 from prez.config import Config, Pen
 from prez.document import DocumentInfo, NotesMode, load_document
 from prez.render import RenderKey, RenderService
@@ -163,6 +171,13 @@ class PrezApp(QObject):
         if isinstance(existing, QApplication):
             self.qapp = existing
         else:
+            if not desktop.is_installed():
+                # Qt registers the app id with xdg-desktop-portal, which needs prez.desktop.
+                QLoggingCategory.setFilterRules("qt.qpa.services.warning=false")
+                log.warning(
+                    "prez.desktop is not installed; run `prez --install-desktop-file` once "
+                    "so the compositor and the desktop portal know this app"
+                )
             self.qapp = QApplication(list(argv) or ["prez"])
         self.qapp.setApplicationName("prez")
         self.qapp.setDesktopFileName("prez")  # Wayland app_id, for compositor window rules

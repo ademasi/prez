@@ -544,3 +544,5 @@ Deviations from the contract above that are now the de-facto interface:
   the PDF only. `NotesPane(render)` shows the notes region, else annotations, else a
   placeholder. Docks are **Next slide** and **Notes** (`LAYOUT_VERSION = 3`).
 - Toolbar no longer has Open / Prev / Next; those remain keyboard actions (`O`, arrows).
+- `prez/desktop.py` + `prez --install-desktop-file`: writes `prez.desktop`; `PrezApp` silences
+  `qt.qpa.services` and logs a hint when it is missing.

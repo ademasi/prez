@@ -118,4 +118,9 @@ for_window [app_id="prez" title="prez — content"] fullscreen enable
 for_window [app_id="prez" title=" — prez$"] move workspace 9
 ```
 
-puts them where you like. Pressing `S` swaps the two screens at any time.
+puts them where you like. Pressing `S` swaps the two screens at any time: the slides go
+fullscreen on the other monitor and the presenter takes the one they left.
+
+Run `prez --install-desktop-file` once. It writes `~/.local/share/applications/prez.desktop`,
+which the desktop portal and the compositor use to recognise the app (without it Qt
+logs "Could not register app ID: App info not found for 'prez'" and prez prints a hint).

@@ -95,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LEVEL",
         help="logging level (default: WARNING)",
     )
+    parser.add_argument(
+        "--install-desktop-file",
+        action="store_true",
+        help="write ~/.local/share/applications/prez.desktop (Wayland app id, portal "
+        "registration, window rules) and exit",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     return parser
 
@@ -124,6 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.list_screens:
         return list_screens()
+    if args.install_desktop_file:
+        from prez import desktop
+
+        path = desktop.install()
+        print(f"installed {path}")
+        return 0
 
     if args.file is not None and not os.path.isfile(args.file):
         print(f"prez: no such file: {args.file}", file=sys.stderr)

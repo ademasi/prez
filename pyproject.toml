@@ -1,0 +1,40 @@
+[project]
+name = "prez"
+version = "0.1.0"
+description = "Fast dual-screen PDF presenter (pympress reimplementation) built on Qt and MuPDF"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-2.0-or-later"
+dependencies = [
+    "pyside6>=6.8",
+    "pymupdf>=1.25",
+]
+
+[project.scripts]
+prez = "prez.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prez"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

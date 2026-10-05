@@ -707,11 +707,11 @@ def test_app_timer_controls(prez_app) -> None:
     assert app.timer.state == TimerState.IDLE
     app.set_talk_time(600)
     app.presenter.update_time(app.timer)
-    assert app.presenter.progress.isVisibleTo(app.presenter)
+    assert app.presenter.progress_strip.isVisibleTo(app.presenter)
     assert app.presenter.remaining_label.text() == app.timer.format(600)
     app.set_talk_time(None)
     app.presenter.update_time(app.timer)
-    assert not app.presenter.progress.isVisibleTo(app.presenter)
+    assert not app.presenter.progress_strip.isVisibleTo(app.presenter)
 
 
 def test_app_notes_mode_cycle_and_reload(prez_app) -> None:
@@ -817,3 +817,15 @@ def test_theme_uses_foot_palette(prez_app) -> None:
     assert palette.color(QPalette.ColorRole.Window).name() == theme.BASE
     assert palette.color(QPalette.ColorRole.Highlight).name() == theme.PEACH
     assert theme.BASE == "#24273a"  # foot background
+
+
+def test_progress_strip_spans_the_window(prez_app, qtbot) -> None:
+    presenter = prez_app.presenter
+    presenter.resize(1400, 900)
+    presenter.show()
+    qtbot.waitExposed(presenter)
+    prez_app.set_talk_time(600)
+    presenter.update_time(prez_app.timer)
+    qtbot.waitUntil(lambda: presenter.progress.isVisible())
+    assert presenter.progress.width() >= presenter.width() - 20
+    assert presenter.progress.width() > presenter.centralWidget().width()

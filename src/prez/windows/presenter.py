@@ -195,25 +195,41 @@ class PresenterWindow(QMainWindow):
         self.stack.addWidget(self.current_view)
         self.stack.addWidget(self.overview)
 
-        self.progress = QProgressBar()
-        self.progress.setObjectName("TalkProgress")
-        self.progress.setRange(0, 1000)
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(5)
-        self.progress.hide()
-
         central = QWidget()
         self._central_layout = QVBoxLayout(central)
         self._central_layout.setContentsMargins(0, 0, 0, 0)
         self._central_layout.setSpacing(0)
         self._central_layout.addWidget(self.stack, 1)
-        self._central_layout.addWidget(self.progress)
         self.setCentralWidget(central)
+        self._build_progress()
 
         self.current_view.clicked.connect(self._on_view_clicked)
         self.current_view.link_activated.connect(self._on_link)
         self.overview.activated.connect(self._on_overview_activated)
         self.overview.closed.connect(self.hide_overview)
+
+    def _build_progress(self) -> None:
+        """Talk-time progress: a 5 px strip in a bottom toolbar, so it spans the whole window
+        (the central widget alone stops where the docks begin)."""
+        self.progress = QProgressBar()
+        self.progress.setObjectName("TalkProgress")
+        self.progress.setRange(0, 1000)
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(5)
+        self.progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        strip = QToolBar("Talk progress", self)
+        strip.setObjectName("TalkProgressStrip")
+        strip.setMovable(False)
+        strip.setFloatable(False)
+        strip.setAllowedAreas(Qt.ToolBarArea.BottomToolBarArea)
+        strip.setContentsMargins(0, 0, 0, 0)
+        strip.setStyleSheet("QToolBar#TalkProgressStrip { padding: 0; border: none; spacing: 0; }")
+        strip.addWidget(self.progress)
+        strip.toggleViewAction().setVisible(False)  # keep it out of the toolbar context menu
+        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, strip)
+        strip.hide()
+        self.progress_strip = strip
 
     def _build_docks(self) -> None:
         self.next_view = SlideView(self.render, Region.SLIDE)
@@ -532,12 +548,12 @@ class PresenterWindow(QMainWindow):
         remaining = timer.remaining
         if remaining is None:
             self.remaining_label.hide()
-            self.progress.hide()
+            self.progress_strip.hide()
         else:
             self.remaining_label.setText(timer.format(remaining))
             self.remaining_label.show()
             self.progress.setValue(int(max(0.0, min(1.0, fraction or 0.0)) * 1000))
-            self.progress.show()
+            self.progress_strip.show()
 
         if self.config.show_clock:
             self.clock_label.setText(QTime.currentTime().toString("HH:mm"))
